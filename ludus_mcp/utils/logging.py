@@ -2,9 +2,12 @@
 
 import logging
 import sys
+from pathlib import Path
 from typing import Any
 
 from .config import get_settings
+
+LOG_FILE = Path.home() / ".ludus-fastmcp" / "ludus-fastmcp.log"
 
 
 class UserFriendlyFormatter(logging.Formatter):
@@ -24,36 +27,55 @@ class UserFriendlyFormatter(logging.Formatter):
         return formatter.format(record)
 
 
-def setup_logging(quiet: bool = False) -> None:
-    """Configure application logging with user-friendly output."""
+def setup_logging(quiet: bool = False, log_to_file: bool = True) -> None:
+    """Configure application logging with user-friendly output.
+
+    Args:
+        quiet: Suppress most logs regardless of configured level.
+        log_to_file: Also write logs to LOG_FILE. Should be False in daemon
+            mode, where stderr is already redirected to that same file at
+            the OS level (os.dup2), to avoid writing each line twice.
+    """
     settings = get_settings()
-    
-    # In quiet mode or when running as MCP server, suppress most logs
-    if quiet or _is_mcp_server_mode():
-        log_level = logging.WARNING
-    else:
-        log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    configured_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    # In quiet mode, suppress stderr output regardless of configured level,
+    # but the log file (if enabled) still honors the configured level so
+    # DEBUG/INFO logs remain available for troubleshooting even when the
+    # server was launched quietly by an MCP client.
+    stderr_level = logging.WARNING if quiet else configured_level
 
     # Create handler with user-friendly formatter
     handler = logging.StreamHandler(sys.stderr)  # Use stderr for logs
     handler.setFormatter(UserFriendlyFormatter())
+    handler.setLevel(stderr_level)
 
-    # Configure root logger
+    handlers: list[logging.Handler] = [handler]
+    root_level = stderr_level
+
+    if log_to_file:
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(LOG_FILE)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+        )
+        file_handler.setLevel(configured_level)
+        handlers.append(file_handler)
+        root_level = min(root_level, configured_level)
+
+    # Configure root logger. setup_logging() may be called more than once in
+    # the same process (e.g. once at import time, again after CLI args are
+    # parsed) - close prior handlers so file handles from an earlier call
+    # aren't leaked.
     root_logger = logging.getLogger()
-    root_logger.setLevel(log_level)
-    root_logger.handlers = [handler]
+    for old_handler in root_logger.handlers:
+        old_handler.close()
+    root_logger.setLevel(root_level)
+    root_logger.handlers = handlers
 
     # Suppress verbose logs from dependencies
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
-
-
-def _is_mcp_server_mode() -> bool:
-    """Check if running as MCP server (stdio mode)."""
-    # MCP servers communicate via stdio, so if stdin is a TTY, we're not in MCP mode
-    import sys
-    return not sys.stdin.isatty()
 
 
 def get_logger(name: str) -> logging.Logger:

@@ -10,6 +10,7 @@ from datetime import datetime
 from fastmcp import FastMCP
 from ludus_mcp.core.client import LudusAPIClient
 from ludus_mcp.server.tools.core import create_core_tools
+from ludus_mcp.server.mcp_logging_middleware import RequestResponseLoggingMiddleware
 from ludus_mcp.utils.config import get_settings
 from ludus_mcp.utils.logging import setup_logging, get_logger
 
@@ -96,6 +97,13 @@ def _initialize_mcp_server() -> FastMCP:
     # Create main FastMCP server and register tools
     client = get_client()
     mcp = create_core_tools(client)
+
+    # Log every request/response payload when LOG_LEVEL=DEBUG. Driven purely by
+    # env/.env config so it works whether the server is spawned by an MCP client
+    # or run manually - no --verbose flag or command-line change needed.
+    if get_settings().log_level.upper() == "DEBUG":
+        mcp.add_middleware(RequestResponseLoggingMiddleware())
+        logger.debug("Request/response logging middleware enabled (LOG_LEVEL=DEBUG)")
 
     # Import all tool modules
     try:
@@ -682,6 +690,12 @@ def cli_main():
             print(f"Unknown option: {arg}")
             print("Run 'ludus-fastmcp --help' for usage information")
             sys.exit(1)
+
+    # Re-apply logging config now that --verbose/--daemon have been parsed.
+    # log_to_file is disabled in daemon mode: os.dup2() in _start_daemon()
+    # already redirects this process's stderr into the same log file, so
+    # adding a FileHandler there would duplicate every line.
+    setup_logging(quiet=not _verbose_mode, log_to_file=not _daemon_mode)
 
     # Normal server startup
     try:
