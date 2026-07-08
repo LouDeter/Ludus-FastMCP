@@ -690,7 +690,7 @@ def cli_main():
 
         if _verbose_mode:
             # Count total tools
-            total_tools = asyncio.run(mcp.get_tools())
+            total_tools = asyncio.run(mcp.list_tools())
             tool_count = len(total_tools)
 
             print("[INFO] Starting MCP Server:", file=sys.stderr)
