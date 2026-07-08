@@ -298,7 +298,7 @@ For more information, run: ludus-fastmcp --list-tools
 async def list_tools_async(detailed: bool = False):
     """List all available tools."""
     mcp = _initialize_mcp_server()
-    tools = await mcp.get_tools()
+     tools = [tool.name for tool in await mcp.list_tools()]
 
     print("\n" + "=" * 80)
     print(f"Ludus MCP Tools - {len(tools)} tools available")
